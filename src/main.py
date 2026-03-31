@@ -13,4 +13,6 @@ from test_phase1 import test_phase1
 from test_phase2 import test_phase2
 #df2 = test_phase2()
 from test_phase3 import test_phase3
-df3 = test_phase3()
+#df3 = test_phase3()
+from test_phase4 import test_phase4
+df4 = test_phase4()

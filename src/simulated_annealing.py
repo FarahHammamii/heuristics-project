@@ -1,11 +1,10 @@
 import random
 import math
-import copy
 from solution import Solution
-from operators import Operators
+
 
 class SimulatedAnnealing:
-    """Recuit simulé complet"""
+    """Recuit simulé simplifié (uniquement relocate)"""
     
     def __init__(self, data, operators):
         self.data = data
@@ -29,98 +28,74 @@ class SimulatedAnnealing:
         return -delta_moy / math.log(taux_accept)
     
     def run(self, solution_initiale, alpha_cool=0.95, 
-            iter_par_palier=None, use_adaptive_weights=True,
-            use_route_merge=True, use_auto_t0=True):
-        """Exécute le recuit simulé"""
+            iter_par_palier=None, use_auto_t0=True,
+            use_route_merge=False):
+        """
+        Exécute le recuit simulé avec UNIQUEMENT relocate
+        
+        Paramètres:
+        - solution_initiale: solution de départ
+        - alpha_cool: facteur de refroidissement (ex: 0.90, 0.95, 0.99)
+        - iter_par_palier: nombre d'itérations par palier (None = auto)
+        - use_auto_t0: True = estimation auto, False = T0=100
+        - use_route_merge: True = fusionner les routes à la fin
+        """
         
         # Paramètres
         if iter_par_palier is None:
-            iter_par_palier = 100 * self.n
+            iter_par_palier = 50 * self.n  # Réduit pour tests rapides
         
         if use_auto_t0:
             T0 = self.estimate_t0(solution_initiale)
         else:
             T0 = 100.0
         
-        T_fin = 0.01
+        T_fin = 5.0  # Température finale plus élevée pour arrêter plus tôt
         
         # Initialisation
         solution_courante = solution_initiale.copy()
         meilleure_solution = solution_initiale.copy()
+        meilleur_coût = solution_initiale.total_cost()
         T = T0
         
-        # Poids adaptatifs
-        operators_list = ['or_opt_1', 'or_opt_2', 'or_opt_3', 'relocate', 'swap']
-        if use_adaptive_weights:
-            poids = [1.0] * len(operators_list)
-            scores = [0] * len(operators_list)
-            utilisations = [0] * len(operators_list)
-        else:
-            poids = [1.0] * len(operators_list)
-        
-        segment = 0
+        palier = 0
         
         while T > T_fin:
-            for it in range(iter_par_palier):
-                # Sélection opérateur
-                if use_adaptive_weights:
-                    op = random.choices(range(len(operators_list)), weights=poids)[0]
-                    utilisations[op] += 1
-                else:
-                    op = random.randint(0, len(operators_list)-1)
+            palier += 1
+            
+            for _ in range(iter_par_palier):
+                # UNIQUEMENT RELOCATE
+                nouvelle = self.operators.relocate(solution_courante)
                 
-                # Générer voisin
-                nouvelle_sol = self._apply_operator(solution_courante, operators_list[op])
+                # Vérifier si la solution a changé
+                if nouvelle.total_cost() == solution_courante.total_cost() and \
+                   nouvelle.nb_vehicles() == solution_courante.nb_vehicles():
+                    continue
                 
-                # Évaluation
-                delta_E = nouvelle_sol.total_cost() - solution_courante.total_cost()
+                delta = nouvelle.total_cost() - solution_courante.total_cost()
                 
-                # Décision d'acceptation
-                if delta_E < 0:
-                    solution_courante = nouvelle_sol
-                    if use_adaptive_weights:
-                        scores[op] += 3
+                # Décision d'acceptation (Metropolis)
+                if delta < 0:
+                    # Amélioration → toujours acceptée
+                    solution_courante = nouvelle
                     
-                    if nouvelle_sol.total_cost() < meilleure_solution.total_cost():
-                        meilleure_solution = nouvelle_sol.copy()
-                        if use_adaptive_weights:
-                            scores[op] += 2
+                    if nouvelle.total_cost() < meilleur_coût:
+                        meilleure_solution = nouvelle.copy()
+                        meilleur_coût = nouvelle.total_cost()
                 else:
-                    if random.random() < math.exp(-delta_E / T):
-                        solution_courante = nouvelle_sol
-                        if use_adaptive_weights:
-                            scores[op] += 1
+                    # Dégradation → acceptée avec probabilité exp(-delta/T)
+                    if random.random() < math.exp(-delta / T):
+                        solution_courante = nouvelle
             
             # Refroidissement
             T *= alpha_cool
-            segment += 1
             
-            # Mise à jour poids adaptatifs
-            if use_adaptive_weights and segment % 10 == 0:
-                for op in range(len(operators_list)):
-                    if utilisations[op] > 0:
-                        avg_score = scores[op] / utilisations[op]
-                        poids[op] = 0.6 * poids[op] + 0.4 * avg_score
-                    scores[op] = 0
-                    utilisations[op] = 0
-            
-            # Route Merge tardif
-            if use_route_merge and T < 0.5 * T0:
-                solution_courante = self.operators.route_merge(solution_courante)
+            # Afficher progression (optionnel)
+            # print(f"  Palier {palier}: T={T:.2f}, meilleur coût={meilleur_coût:.2f}")
+        
+        # Fusion des routes (optionnel)
+        if use_route_merge:
+            print("  Application de RouteMerge...")
+            meilleure_solution = self.operators.route_merge(meilleure_solution)
         
         return meilleure_solution
-    
-    def _apply_operator(self, solution, operator_name):
-        """Applique un opérateur"""
-        if operator_name == 'or_opt_1':
-            return self.operators.or_opt(solution, segment_size=1)
-        elif operator_name == 'or_opt_2':
-            return self.operators.or_opt(solution, segment_size=2)
-        elif operator_name == 'or_opt_3':
-            return self.operators.or_opt(solution, segment_size=3)
-        elif operator_name == 'relocate':
-            return self.operators.relocate(solution)
-        elif operator_name == 'swap':
-            return self.operators.swap(solution)
-        else:
-            return solution
