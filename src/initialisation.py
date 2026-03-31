@@ -151,71 +151,83 @@ class Initialisation:
         
         return temps
     
-    def solomon_randomise(self, p_urgents=0.3):
-        """
-        Solomon I1 Randomisé - EXACTEMENT comme dans le test file qui fonctionne
-        """
+    def solomon_randomise(self, p_urgents=0.3, k_best=3):
+        #Solomon I1 Randomisé - Génère uniquement des solutions faisables.
+        #Principe :
+        #1. Priorité aux clients urgents (p_urgents).
+        #2. α et β tirés aléatoirement pour chaque nouvelle route.
+        #3. Insertion basée sur coût distance supplémentaire (C1) + retard (C2).
+        #4. Choix aléatoire parmi les k meilleurs candidats.
+        #5. Garantie que la solution finale est faisable.
+
         solution = []
         non_visites = set(range(1, self.n))
-        
+
         while non_visites:
-            # Randomisation α et β
+            # Randomisation α et β pour cette route
             alpha = random.uniform(0.5, 1.5)
             beta = random.uniform(0.5, 1.5)
-            
-            # Sélection du germe (client le plus éloigné parmi les urgents)
-            urgent_list = sorted(non_visites, key=lambda c: self.customers[c]['due_date'])
+
+            # Sélection du germe parmi les clients urgents
+            sorted_customers = sorted(non_visites, key=lambda c: self.customers[c]['due_date'])
             nb_urgents = max(1, int(p_urgents * len(non_visites)))
-            pool_urgents = urgent_list[:nb_urgents]
-            germe = random.choice(pool_urgents)
-            
-            # Initialisation de la route
+            germes_urgents = sorted_customers[:nb_urgents]
+
+            # Filtrer uniquement les germes faisables
+            feasible_germes = [c for c in germes_urgents if self._verifier_route([0, c, 0])]
+            if not feasible_germes:
+                # Si aucun germe faisable parmi les urgents, choisir le plus urgent faisable
+                for c in sorted_customers:
+                    if self._verifier_route([0, c, 0]):
+                        feasible_germes.append(c)
+                        break
+
+            if not feasible_germes:
+                # Aucun germe faisable possible → on arrête la construction
+                break
+
+            # Choisir aléatoirement un germe faisable
+            germe = random.choice(feasible_germes)
             route = [0, germe, 0]
             non_visites.remove(germe)
-            
-            # Insertion séquentielle
+
+            # Insertion séquentielle des autres clients
             while True:
-                meilleur_client = None
-                meilleure_pos = -1
-                cout_minimal = float('inf')
-                meilleure_route = None
-                
-                for u in non_visites:
-                    for p in range(1, len(route)):
-                        i = route[p-1]
-                        j = route[p]
-                        
-                        # Créer route test
-                        route_test = route[:p] + [u] + route[p:]
-                        
-                        # Vérifier faisabilité
-                        if self._verifier_route(route_test):
-                            # Coût distance
-                            c1 = self.dist[i][u] + self.dist[u][j] - self.dist[i][j]
-                            
-                            # Coût temporel
-                            t_j_avant = self._calculer_temps_arrivee(route, p)
-                            t_j_apres = self._calculer_temps_arrivee(route_test, p + 1)
-                            c2 = max(0, t_j_apres - t_j_avant)
-                            
-                            cout_total = alpha * c1 + beta * c2
-                            
-                            if cout_total < cout_minimal:
-                                cout_minimal = cout_total
-                                meilleur_client = u
-                                meilleure_pos = p
-                                meilleure_route = route_test
-                
-                if meilleur_client is not None:
-                    route = meilleure_route
-                    non_visites.remove(meilleur_client)
-                else:
+                candidates = []
+
+                for client in non_visites:
+                    for pos in range(1, len(route)):
+                        candidate_route = route[:pos] + [client] + route[pos:]
+                        if self._verifier_route(candidate_route):
+                            i, j = route[pos - 1], route[pos]
+                            # C1 : coût distance supplémentaire
+                            C1 = self.dist[i][client] + self.dist[client][j] - self.dist[i][j]
+                            # C2 : retard causé au client suivant et successeurs
+                            t_before = self._calculer_temps_arrivee(route, pos)
+                            t_after = self._calculer_temps_arrivee(candidate_route, pos + 1)
+                            C2 = max(0, t_after - t_before)
+                            total_cost = alpha * C1 + beta * C2
+                            candidates.append((client, pos, candidate_route, total_cost))
+
+                if not candidates:
+                    # Aucune insertion faisable → fin de la route
                     break
-            
+
+                # Randomisation parmi les k meilleures candidates
+                candidates.sort(key=lambda x: x[3])
+                pool = candidates[:min(k_best, len(candidates))]
+                chosen_client, _, chosen_route, _ = random.choice(pool)
+
+                route = chosen_route
+                non_visites.remove(chosen_client)
+
             solution.append(route)
-        
+
+        # Retourne une solution entièrement faisable
         return Solution(solution, self.data)
+
     
+
     # ==================== MÉTHODE 3: REGRET-2 ====================
     
     def regret_based_init(self, epsilon=0.1):
